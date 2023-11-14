@@ -1,3 +1,4 @@
+#  type: ignore # for now
 # coding=utf-8
 
 """QGIS plugin implementation.
@@ -27,8 +28,10 @@ __copyright__ = (
 )
 
 import logging
-from typing import Dict, List, Optional, Union
+import typing
+from typing import Any, ClassVar, Optional, Union
 
+from qgis import core as qgis_core
 from qgis.core import (
     QgsLayerTree,
     QgsMapLayer,
@@ -36,41 +39,61 @@ from qgis.core import (
     QgsRelationManager,
     QgsVectorLayer,
 )
-from qgis.gui import QgsMapCanvas
-from qgis.PyQt import sip
-from qgis.PyQt.QtCore import QObject, pyqtSignal, pyqtSlot
-from qgis.PyQt.QtWidgets import (
-    QAction,
-    QDockWidget,
-    QMainWindow,
-    QMenuBar,
-    QToolBar,
-    QWidget,
+from qgis.gui import QgisInterface as QgisAbstractInterface
+from qgis.gui import (
+    QgsAbstractMapToolHandler,
+    QgsAdvancedDigitizingDockWidget,
+    QgsApplicationExitBlockerInterface,
+    QgsAttributeDialog,
+    QgsBrowserGuiModel,
+    QgsCustomDropHandler,
+    QgsCustomProjectOpenHandler,
+    QgsDevToolWidgetFactory,
+    QgsLayerTreeMapCanvasBridge,
+    QgsLayerTreeView,
+    QgsLayoutCustomDropHandler,
+    QgsLayoutDesignerInterface,
+    QgsMapCanvas,
+    QgsMapLayerConfigWidgetFactory,
+    QgsMessageBar,
+    QgsOptionsWidgetFactory,
+    QgsPluginManagerInterface,
+    QgsStatusBar,
 )
+from qgis.PyQt import QtCore, QtGui, QtWidgets, sip
+from qgis.PyQt.QtCore import pyqtSignal, pyqtSlot
 
 from pytest_qgis.mock_qgis_classes import MockMessageBar
 
 LOGGER = logging.getLogger("QGIS")
 
 
-# noinspection PyMethodMayBeStatic,PyPep8Naming
-class QgisInterface(QObject):
-    """Class to expose QGIS objects and functions to plugins.
+class QgisInterface(QgisAbstractInterface):
+    """
+    Class to expose QGIS objects and functions to plugins.
 
     This class is here for enabling us to run unit tests only,
-    so most methods are simply stubs.
+    so some of the methods are simply stubs.
     """
 
-    currentLayerChanged = pyqtSignal(QgsMapCanvas)  # noqa: N815
+    currentLayerChanged = QtCore.pyqtSignal(QgsMapCanvas)  # noqa: N815
     newProjectCreated = pyqtSignal()  # noqa: N815
 
+    layerSavedAs: ClassVar[QtCore.pyqtSignal]
+    projectRead: ClassVar[QtCore.pyqtSignal]
+    initializationCompleted: ClassVar[QtCore.pyqtSignal]
+    layoutDesignerClosed: ClassVar[QtCore.pyqtSignal]
+    layoutDesignerWillBeClosed: ClassVar[QtCore.pyqtSignal]
+    layoutDesignerOpened: ClassVar[QtCore.pyqtSignal]
+    currentThemeChanged: ClassVar[QtCore.pyqtSignal]
+
     def __init__(
-        self, canvas: QgsMapCanvas, messageBar: MockMessageBar, mainWindow: QMainWindow
+        self,
+        canvas: QgsMapCanvas,
+        messageBar: MockMessageBar,
+        mainWindow: QtWidgets.QMainWindow,
     ) -> None:
-        """Constructor
-        :param canvas:
-        """
-        QObject.__init__(self)
+        super().__init__()
         self.canvas = canvas
         self._messageBar = messageBar
         self._mainWindow = mainWindow
@@ -79,24 +102,22 @@ class QgisInterface(QObject):
         # Set up slots so we can mimic the behaviour of QGIS when layers
         # are added.
         LOGGER.debug("Initialising canvas...")
-        # noinspection PyArgumentList
         QgsProject.instance().layersAdded.connect(self.addLayers)
-        # noinspection PyArgumentList
         QgsProject.instance().removeAll.connect(self.removeAllLayers)
 
         # For processing module
         self.destCrs = None
-        self._layers: List[QgsMapLayer] = []
+        self._layers: list[QgsMapLayer] = []
 
         # Add the MenuBar
-        menu_bar = QMenuBar()
+        menu_bar = QtWidgets.QMenuBar()
         self._mainWindow.setMenuBar(menu_bar)
 
         # Add the toolbar list
-        self._toolbars: Dict[str, QToolBar] = {}
+        self._toolbars: dict[str, QtWidgets.QToolBar] = {}
 
     @pyqtSlot("QList<QgsMapLayer*>")
-    def addLayers(self, layers: List[QgsMapLayer]) -> None:
+    def addLayers(self, layers: list[QgsMapLayer]) -> None:
         """Handle layers being added to the registry so they show up in canvas.
 
         :param layers: list<QgsMapLayer> list of map layers that were added
@@ -125,7 +146,7 @@ class QgisInterface(QObject):
             self.canvas.setLayers([])
         self._layers = []
 
-    def newProject(self) -> None:
+    def newProject(self, promptToSaveFlag: bool = False) -> bool:
         """Create new project."""
         # noinspection PyArgumentList
         instance = QgsProject.instance()
@@ -137,129 +158,987 @@ class QgisInterface(QObject):
             relation_manager.removeRelation(relation)
         self._layers = []
         self.newProjectCreated.emit()
+        return True
 
-    # ---------------- API Mock for QgsInterface follows -------------------
+    def setGpsPanelConnection(
+        self, connection: Optional[qgis_core.QgsGpsConnection]
+    ) -> None:
+        pass
 
-    def zoomFull(self) -> None:
-        """Zoom to the map full extent."""
+    def browserModel(self) -> Optional["QgsBrowserGuiModel"]:
+        pass
 
-    def zoomToPrevious(self) -> None:
-        """Zoom to previous view extent."""
+    def askForDatumTransform(
+        self,
+        sourceCrs: qgis_core.QgsCoordinateReferenceSystem,
+        destinationCrs: qgis_core.QgsCoordinateReferenceSystem,
+    ) -> bool:
+        pass
 
-    def zoomToNext(self) -> None:
-        """Zoom to next view extent."""
+    def invalidateLocatorResults(self) -> None:
+        pass
 
-    def zoomToActiveLayer(self) -> None:
-        """Zoom to extent of active layer."""
+    def deregisterLocatorFilter(
+        self, filter: Optional[qgis_core.QgsLocatorFilter]
+    ) -> None:
+        pass
+
+    def registerLocatorFilter(
+        self, filter: Optional[qgis_core.QgsLocatorFilter]
+    ) -> None:
+        pass
+
+    def locatorSearch(self, searchText: Optional[str]) -> None:
+        pass
+
+    def preloadForm(self, uifile: Optional[str]) -> None:
+        pass
+
+    def getFeatureForm(
+        self, layer: Optional[qgis_core.QgsVectorLayer], f: qgis_core.QgsFeature
+    ) -> Optional["QgsAttributeDialog"]:
+        pass
+
+    def openFeatureForm(
+        self,
+        l: Optional[qgis_core.QgsVectorLayer],
+        f: qgis_core.QgsFeature,
+        updateFeatureOnly: bool = ...,
+        showModal: bool = ...,
+    ) -> bool:
+        pass
+
+    def openURL(self, url: Optional[str], useQgisDocDirectory: bool = ...) -> None:
+        pass
+
+    def unregisterCustomLayoutDropHandler(
+        self, handler: Optional["QgsLayoutCustomDropHandler"]
+    ) -> None:
+        pass
+
+    def registerCustomLayoutDropHandler(
+        self, handler: Optional["QgsLayoutCustomDropHandler"]
+    ) -> None:
+        pass
+
+    def unregisterCustomProjectOpenHandler(
+        self, handler: Optional["QgsCustomProjectOpenHandler"]
+    ) -> None:
+        pass
+
+    def registerCustomProjectOpenHandler(
+        self, handler: Optional["QgsCustomProjectOpenHandler"]
+    ) -> None:
+        pass
+
+    def unregisterCustomDropHandler(
+        self, handler: Optional["QgsCustomDropHandler"]
+    ) -> None:
+        pass
+
+    def registerCustomDropHandler(
+        self, handler: Optional["QgsCustomDropHandler"]
+    ) -> None:
+        pass
+
+    def unregisterMapToolHandler(
+        self, handler: Optional["QgsAbstractMapToolHandler"]
+    ) -> None:
+        pass
+
+    def registerMapToolHandler(
+        self, handler: Optional["QgsAbstractMapToolHandler"]
+    ) -> None:
+        pass
+
+    def unregisterApplicationExitBlocker(
+        self, blocker: Optional["QgsApplicationExitBlockerInterface"]
+    ) -> None:
+        pass
+
+    def registerApplicationExitBlocker(
+        self, blocker: Optional["QgsApplicationExitBlockerInterface"]
+    ) -> None:
+        pass
+
+    def unregisterDevToolWidgetFactory(
+        self, factory: Optional["QgsDevToolWidgetFactory"]
+    ) -> None:
+        pass
+
+    def registerDevToolWidgetFactory(
+        self, factory: Optional["QgsDevToolWidgetFactory"]
+    ) -> None:
+        pass
+
+    def unregisterProjectPropertiesWidgetFactory(
+        self, factory: Optional["QgsOptionsWidgetFactory"]
+    ) -> None:
+        pass
+
+    def registerProjectPropertiesWidgetFactory(
+        self, factory: Optional["QgsOptionsWidgetFactory"]
+    ) -> None:
+        pass
+
+    def unregisterOptionsWidgetFactory(
+        self, factory: Optional["QgsOptionsWidgetFactory"]
+    ) -> None:
+        pass
+
+    def registerOptionsWidgetFactory(
+        self, factory: Optional["QgsOptionsWidgetFactory"]
+    ) -> None:
+        pass
+
+    def unregisterMapLayerConfigWidgetFactory(
+        self, factory: Optional["QgsMapLayerConfigWidgetFactory"]
+    ) -> None:
+        pass
+
+    def registerMapLayerConfigWidgetFactory(
+        self, factory: Optional["QgsMapLayerConfigWidgetFactory"]
+    ) -> None:
+        pass
+
+    def unregisterMainWindowAction(self, action: Optional[QtWidgets.QAction]) -> bool:
+        pass
+
+    def registerMainWindowAction(
+        self, action: Optional[QtWidgets.QAction], defaultShortcut: Optional[str]
+    ) -> bool:
+        pass
+
+    def removeWindow(self, action: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def addWindow(self, action: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def showAttributeTable(
+        self,
+        l: Optional[qgis_core.QgsVectorLayer],
+        filterExpression: Optional[str] = ...,
+    ) -> Optional[QtWidgets.QDialog]:
+        pass
+
+    def showLayerProperties(
+        self, layer: Optional[qgis_core.QgsMapLayer], page: Optional[str] = ...
+    ) -> None:
+        pass
+
+    def removeDockWidget(self, dockwidget: Optional[QtWidgets.QDockWidget]) -> None:
+        pass
+
+    def addTabifiedDockWidget(
+        self,
+        area: QtCore.Qt.DockWidgetArea,
+        dockwidget: Optional[QtWidgets.QDockWidget],
+        tabifyWith: typing.Iterable[Optional[str]] = ...,
+        raiseTab: bool = ...,
+    ) -> None:
+        pass
+
+    def addDockWidget(
+        self,
+        area: QtCore.Qt.DockWidgetArea,
+        dockwidget: Optional[QtWidgets.QDockWidget],
+    ) -> None:
+        pass
+
+    def removePluginMeshMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def addPluginToMeshMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def removePluginWebMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def addPluginToWebMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def removePluginVectorMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def addPluginToVectorMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def removePluginRasterMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def addPluginToRasterMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def removePluginDatabaseMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def addPluginToDatabaseMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def removeAddLayerAction(self, action: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def insertAddLayerAction(self, action: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def removePluginMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def addPluginToMenu(
+        self, name: Optional[str], action: Optional[QtWidgets.QAction]
+    ) -> None:
+        pass
+
+    def saveStyleSheetOptions(self, opts: dict[Optional[str], Any]) -> None:
+        pass
+
+    def buildStyleSheet(self, opts: dict[Optional[str], Any]) -> None:
+        pass
+
+    def showProjectPropertiesDialog(self, currentPage: Optional[str] = ...) -> None:
+        pass
+
+    def showOptionsDialog(
+        self,
+        parent: Optional[QtWidgets.QWidget] = ...,
+        currentPage: Optional[str] = ...,
+    ) -> None:
+        pass
+
+    def openLayoutDesigner(
+        self, layout: Optional[qgis_core.QgsMasterLayoutInterface]
+    ) -> Optional["QgsLayoutDesignerInterface"]:
+        pass
+
+    def showLayoutManager(self) -> None:
+        pass
+
+    def addUserInputWidget(self, widget: Optional[QtWidgets.QWidget]) -> None:
+        pass
+
+    def openMessageLog(self) -> None:
+        pass
+
+    @typing.overload
+    def addToolBar(self, name: Optional[str]) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    @typing.overload
+    def addToolBar(
+        self,
+        toolbar: Optional[QtWidgets.QToolBar],
+        area: Optional[QtCore.Qt.ToolBarArea] = None,
+    ) -> None:
+        pass
+
+    def addToolBar(
+        self,
+        toolbar: Union[str, QtWidgets.QToolBar],
+        area: Optional[QtCore.Qt.ToolBarArea] = None,
+    ) -> Optional[QtWidgets.QToolBar]:
+        if isinstance(toolbar, str):
+            name = toolbar
+            _toolbar = QtWidgets.QToolBar(name, parent=self._mainWindow)
+        else:
+            name = toolbar.windowTitle()
+            _toolbar = toolbar
+        self._toolbars[name] = _toolbar
+        return _toolbar if isinstance(toolbar, str) else None
+
+    def removeWebToolBarIcon(self, qAction: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def addWebToolBarWidget(
+        self, widget: Optional[QtWidgets.QWidget]
+    ) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def addWebToolBarIcon(self, qAction: Optional[QtWidgets.QAction]) -> int:
+        pass
+
+    def removeDatabaseToolBarIcon(self, qAction: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def addDatabaseToolBarWidget(
+        self, widget: Optional[QtWidgets.QWidget]
+    ) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def addDatabaseToolBarIcon(self, qAction: Optional[QtWidgets.QAction]) -> int:
+        pass
+
+    def removeVectorToolBarIcon(self, qAction: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def addVectorToolBarWidget(
+        self, widget: Optional[QtWidgets.QWidget]
+    ) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def addVectorToolBarIcon(self, qAction: Optional[QtWidgets.QAction]) -> int:
+        pass
+
+    def removeRasterToolBarIcon(self, qAction: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def addRasterToolBarIcon(self, qAction: Optional[QtWidgets.QAction]) -> int:
+        pass
+
+    def addRasterToolBarWidget(
+        self, widget: Optional[QtWidgets.QWidget]
+    ) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def removeToolBarIcon(self, qAction: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def addToolBarWidget(
+        self, widget: Optional[QtWidgets.QWidget]
+    ) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def addToolBarIcon(self, qAction: Optional[QtWidgets.QAction]) -> int:
+        pass
+
+    def pasteFromClipboard(self, a0: Optional[qgis_core.QgsMapLayer]) -> None:
+        pass
+
+    def copySelectionToClipboard(self, a0: Optional[qgis_core.QgsMapLayer]) -> None:
+        pass
+
+    def setActiveLayer(self, layer: Optional[qgis_core.QgsMapLayer]) -> bool:
+        """
+        Set the active layer (layer gets selected in the legend)
+        """
+        if layer is not None and QgsProject.instance().mapLayer(layer.id()):
+            self._active_layer_id = layer.id()
+            return True
+        return False
+
+    def reloadConnections(self) -> None:
+        pass
+
+    def addProject(self, project: Optional[str]) -> bool:
+        pass
+
+    def addTiledSceneLayer(
+        self, url: Optional[str], baseName: Optional[str], providerKey: Optional[str]
+    ) -> Optional[qgis_core.QgsTiledSceneLayer]:
+        pass
+
+    def addPointCloudLayer(
+        self, url: Optional[str], baseName: Optional[str], providerKey: Optional[str]
+    ) -> Optional[qgis_core.QgsPointCloudLayer]:
+        pass
+
+    def addVectorTileLayer(
+        self, url: Optional[str], baseName: Optional[str]
+    ) -> Optional[qgis_core.QgsVectorTileLayer]:
+        pass
+
+    def addMeshLayer(
+        self, url: Optional[str], baseName: Optional[str], providerKey: Optional[str]
+    ) -> Optional[qgis_core.QgsMeshLayer]:
+        pass
+
+    @typing.overload
+    def addRasterLayer(
+        self, rasterLayerPath: Optional[str], baseName: Optional[str] = ...
+    ) -> Optional[qgis_core.QgsRasterLayer]:
+        pass
+
+    @typing.overload
+    def addRasterLayer(
+        self, url: Optional[str], layerName: Optional[str], providerKey: Optional[str]
+    ) -> Optional[qgis_core.QgsRasterLayer]:
+        pass
 
     def addVectorLayer(
-        self, path: str, base_name: str, provider_key: str
-    ) -> QgsVectorLayer:
-        """Add a vector layer.
-
-        :param path: Path to layer.
-        :type path: str
-
-        :param base_name: Base name for layer.
-        :type base_name: str
-
-        :param provider_key: Provider key e.g. 'ogr'
-        :type provider_key: str
-        """
-        layer = QgsVectorLayer(path, base_name, provider_key)
+        self,
+        vectorLayerPath: Optional[str],
+        baseName: Optional[str],
+        providerKey: Optional[str],
+    ) -> Optional[qgis_core.QgsVectorLayer]:
+        layer = QgsVectorLayer(vectorLayerPath, baseName, providerKey)
         self.addLayers([layer])
         return layer
 
-    def addRasterLayer(self, path: str, base_name: str) -> None:
-        """Add a raster layer given a raster layer file name
+    def zoomToActiveLayer(self) -> None:
+        pass
 
-        :param path: Path to layer.
-        :type path: str
+    def zoomToNext(self) -> None:
+        pass
 
-        :param base_name: Base name for layer.
-        :type base_name: str
-        """
+    def zoomToPrevious(self) -> None:
+        pass
 
-    def activeLayer(self) -> Optional[QgsMapLayer]:
-        """Get pointer to the active layer (layer selected in the legend)."""
+    def zoomFull(self) -> None:
+        pass
+
+    def userProfileManager(self) -> Optional[qgis_core.QgsUserProfileManager]:
+        pass
+
+    def layerTreeInsertionPoint(
+        self,
+    ) -> qgis_core.QgsLayerTreeRegistryBridge.InsertionPoint:
+        pass
+
+    def takeAppScreenShots(
+        self, saveDirectory: Optional[str], categories: int = ...
+    ) -> None:
+        pass
+
+    def statusBarIface(self) -> Optional["QgsStatusBar"]:
+        pass
+
+    def messageTimeout(self) -> int:
+        pass
+
+    def vectorLayerTools(self) -> Optional[qgis_core.QgsVectorLayerTools]:
+        pass
+
+    def actionRegularPolygonCenterCorner(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionRegularPolygonCenterPoint(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionRegularPolygon2Points(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionRectangle3PointsProjected(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionRectangle3PointsDistance(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionRectangleExtent(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionRectangleCenterPoint(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionEllipseFoci(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionEllipseExtent(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionEllipseCenterPoint(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionEllipseCenter2Points(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCircleCenterPoint(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCircle2TangentsPoint(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCircle3Tangents(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCircle3Points(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCircle2Points(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAbout(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCheckQgisVersion(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionQgisHomePage(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionHelpContents(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCustomProjection(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionOptions(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionToggleFullScreen(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionShowPythonDialog(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionPluginListSeparator(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionManagePlugins(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionShowSelectedLayers(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionHideDeselectedLayers(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionToggleSelectedLayersIndependently(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionToggleSelectedLayers(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionHideSelectedLayers(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionShowAllLayers(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionHideAllLayers(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionRemoveAllFromOverview(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddAllToOverview(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddToOverview(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionLayerProperties(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionDuplicateLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionLayerSaveAs(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCancelAllEdits(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCancelEdits(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionRollbackAllEdits(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionRollbackEdits(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSaveAllEdits(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSaveEdits(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAllEdits(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSaveActiveLayerEdits(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionToggleEditing(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionOpenStatisticalSummary(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionOpenFieldCalculator(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionOpenTable(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionPasteLayerStyle(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCopyLayerStyle(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddAmsLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddAfsLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddPointCloudLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddVectorTileLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddXyzLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddWmsLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddPgLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddRasterLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddOgrLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionNewVectorLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionDraw(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionShowBookmarks(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionNewBookmark(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionMapTips(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionZoomActualSize(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionZoomNext(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionZoomLast(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionZoomToSelected(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionZoomToLayers(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionZoomToLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionZoomFullExtent(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionMeasureArea(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionMeasure(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionFeatureAction(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionIdentify(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSelectRadius(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSelectFreehand(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSelectPolygon(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSelectRectangle(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSelect(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionZoomOut(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionZoomIn(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionPanToSelected(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionPan(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def mapToolActionGroup(self) -> Optional[QtWidgets.QActionGroup]:
+        pass
+
+    def actionVertexToolActiveLayer(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionVertexTool(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionDeletePart(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionDeleteRing(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSimplifyFeature(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddPart(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddRing(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSplitParts(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSplitFeatures(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionMoveFeature(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionDeleteSelected(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionAddFeature(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionPasteFeatures(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCopyFeatures(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCutFeatures(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionExit(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionShowLayoutManager(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionCreatePrintLayout(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionProjectProperties(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSaveMapAsImage(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSaveProjectAs(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionSaveProject(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionOpenProject(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def actionNewProject(self) -> Optional[QtWidgets.QAction]:
+        pass
+
+    def webToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def databaseToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def vectorToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def rasterToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def helpToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def pluginToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def selectionToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def attributesToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def shapeDigitizeToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def advancedDigitizeToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def digitizeToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def mapNavToolToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def openDataSourceManagerPage(self, pageName: Optional[str]) -> None:
+        pass
+
+    def dataSourceManagerToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def layerToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def fileToolBar(self) -> Optional[QtWidgets.QToolBar]:
+        pass
+
+    def helpMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def windowMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def firstRightStandardMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def webMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def vectorMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def databaseMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def rasterMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def pluginHelpMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def pluginMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def settingsMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def addLayerMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def newLayerMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def layerMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def viewMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def editMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def removeProjectExportAction(self, action: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def addProjectExportAction(self, action: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def removeProjectImportAction(self, action: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def addProjectImportAction(self, action: Optional[QtWidgets.QAction]) -> None:
+        pass
+
+    def projectImportExportMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def projectMenu(self) -> Optional[QtWidgets.QMenu]:
+        pass
+
+    def cadDockWidget(self) -> Optional["QgsAdvancedDigitizingDockWidget"]:
+        pass
+
+    def defaultStyleSheetFont(self) -> QtGui.QFont:
+        pass
+
+    def defaultStyleSheetOptions(self) -> dict[str, Any]:
+        pass
+
+    def openLayoutDesigners(self) -> list["QgsLayoutDesignerInterface"]:
+        pass
+
+    def messageBar(self) -> Optional["QgsMessageBar"]:
+        return self._messageBar
+
+    def mainWindow(self) -> Optional[QtWidgets.QWidget]:
+        return self._mainWindow
+
+    def layerTreeCanvasBridge(self) -> Optional["QgsLayerTreeMapCanvasBridge"]:
+        pass
+
+    def activeDecorations(self) -> list[qgis_core.QgsMapDecoration]:
+        pass
+
+    def mapCanvas(self) -> Optional["QgsMapCanvas"]:
+        return self.canvas
+
+    def activeLayer(self) -> Optional[qgis_core.QgsMapLayer]:
         return (
             QgsProject.instance().mapLayer(self._active_layer_id)
             if self._active_layer_id
             else None
         )
 
-    def addPluginToMenu(self, name: str, action: QAction) -> None:
-        """Add plugin item to menu.
+    def editableLayers(self, modified: bool = ...) -> list[qgis_core.QgsMapLayer]:
+        pass
 
-        :param name: Name of the menu item
-        :type name: str
+    def iconSize(self, dockedToolbar: bool = ...) -> QtCore.QSize:
+        pass
 
-        :param action: Action to add to menu.
-        :type action: QAction
-        """
+    def closeMapCanvas(self, name: Optional[str]) -> None:
+        pass
 
-    def addToolBarIcon(self, action: QAction) -> None:
-        """Add an icon to the plugins toolbar.
+    def createNewMapCanvas(self, name: Optional[str]) -> Optional["QgsMapCanvas"]:
+        pass
 
-        :param action: Action to add to the toolbar.
-        :type action: QAction
-        """
+    def mapCanvases(self) -> list["QgsMapCanvas"]:
+        pass
 
-    def removeToolBarIcon(self, action: QAction) -> None:
-        """Remove an action (icon) from the plugin toolbar.
+    def removeCustomActionForLayerType(
+        self, action: Optional[QtWidgets.QAction]
+    ) -> bool:
+        pass
 
-        :param action: Action to add to the toolbar.
-        :type action: QAction
-        """
+    def addCustomActionForLayer(
+        self,
+        action: Optional[QtWidgets.QAction],
+        layer: Optional[qgis_core.QgsMapLayer],
+    ) -> None:
+        pass
 
-    def addToolBar(self, toolbar: Union[str, QToolBar]) -> QToolBar:
-        """Add toolbar with specified name.
+    def addCustomActionForLayerType(
+        self,
+        action: Optional[QtWidgets.QAction],
+        menu: Optional[str],
+        type: qgis_core.Qgis.LayerType,
+        allLayers: bool,
+    ) -> None:
+        pass
 
-        :param toolbar: Name for the toolbar or QToolBar object.
-        """
-        if isinstance(toolbar, str):
-            name = toolbar
-            _toolbar = QToolBar(name, parent=self._mainWindow)
-        else:
-            name = toolbar.windowTitle()
-            _toolbar = toolbar
-        self._toolbars[name] = _toolbar
-        return _toolbar
+    def layerTreeView(self) -> Optional["QgsLayerTreeView"]:
+        pass
 
-    def mapCanvas(self) -> QgsMapCanvas:
-        """Return a pointer to the map canvas."""
-        return self.canvas
-
-    def mainWindow(self) -> QWidget:
-        """Return a pointer to the main window.
-
-        In case of QGIS it returns an instance of QgisApp.
-        """
-        return self._mainWindow
-
-    def addDockWidget(self, area: int, dock_widget: QDockWidget) -> None:
-        """Add a dock widget to the main window.
-
-        :param area: Where in the ui the dock should be placed.
-        :type area: Qt.DockWidgetArea
-
-        :param dock_widget: A dock widget to add to the UI.
-        :type dock_widget: QDockWidget
-        """
-
-    def legendInterface(self) -> QgsMapCanvas:
-        """Get the legend."""
-        return self.canvas
-
-    def messageBar(self) -> MockMessageBar:
-        """Get the messagebar"""
-        return self._messageBar
-
-    def getMockLayers(self) -> List[QgsMapLayer]:
-        return self._layers
-
-    def setActiveLayer(self, layer: QgsMapLayer) -> None:
-        """
-        Set the active layer (layer gets selected in the legend)
-        """
-        self._active_layer_id = layer.id()
+    def pluginManagerInterface(self) -> Optional["QgsPluginManagerInterface"]:
+        pass
